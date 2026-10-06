@@ -1,8 +1,9 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using System.Xml.XPath;
+using AutoMapper;
+using Microsoft.AspNetCore.JsonPatch;
+using Microsoft.AspNetCore.Mvc;
 using WebApi.MinimalApi.Domain;
 using WebApi.MinimalApi.Models;
-using AutoMapper;
-using System.Linq;
 
 namespace WebApi.MinimalApi.Controllers;
 
@@ -10,13 +11,12 @@ namespace WebApi.MinimalApi.Controllers;
 [ApiController]
 public class UsersController : Controller
 {
-    private readonly IUserRepository userRepository;
-    private readonly IMapper mapper;
-    
     // Чтобы ASP.NET положил что-то в userRepository требуется конфигурация
+    private readonly IUserRepository repository;
+    private readonly IMapper mapper;
     public UsersController(IUserRepository userRepository, IMapper mapper)
     {
-        this.userRepository = userRepository;
+        repository = userRepository;
         this.mapper = mapper;
     }
 
@@ -24,41 +24,64 @@ public class UsersController : Controller
     [Produces("application/json", "application/xml")]
     public ActionResult<UserDto> GetUserById([FromRoute] Guid userId)
     {
-        var userEntity = userRepository.FindById(userId);
+        var userEntity = repository.FindById(userId);
         if (userEntity == null)
             return NotFound();
-        
         var userDto = mapper.Map<UserDto>(userEntity);
         return Ok(userDto);
     }
 
     [HttpPost]
-    [Produces("application/json", "application/xml")]
-    public IActionResult CreateUser([FromBody] PostUserDto user)
+    public IActionResult CreateUser([FromBody] PostUserDto userDto)
     {
-        if (user == null)
+        if (userDto == null)
             return BadRequest();
-
-        if (user.Login != null && !user.Login.All(char.IsLetterOrDigit))
+        if (!ModelState.IsValid || !userDto.Login.All(char.IsLetterOrDigit))
         {
-            ModelState.AddModelError(
-                nameof(user.Login),
-                "Неправильно написан логин");
-        }
-
-        if (!ModelState.IsValid)
+            ModelState.AddModelError("Login", "Invalid login");
             return UnprocessableEntity(ModelState);
-
-        var userEntity = mapper.Map<UserEntity>(user);
-        var createdUserEntity = userRepository.Insert(userEntity);
-
-        var acceptXml = Request.Headers.Accept.Any(
-            value => value.Contains("application/xml", 
-                StringComparison.OrdinalIgnoreCase));
-
+        }
+        var user = repository.Insert(mapper.Map<UserEntity>(userDto));
         return CreatedAtRoute(
             nameof(GetUserById),
-            new { userId = createdUserEntity.Id },
-            acceptXml ? createdUserEntity.Id : new { id = createdUserEntity.Id });
+            new { userId  = user.Id },
+            user.Id);
+    }
+    
+    [HttpPut("{userId}")]
+    [Produces("application/json", "application/xml")]
+    public IActionResult UpdateUser([FromRoute] Guid userId, [FromBody] PutUserDto userDto)
+    {
+        if (userDto == null || userId == Guid.Empty)
+            return BadRequest();
+        if (!ModelState.IsValid)
+            return UnprocessableEntity(ModelState);
+        var userEntity = repository.FindById(userId) ?? new UserEntity(userId);
+        var user = mapper.Map(userDto, userEntity);
+        repository.UpdateOrInsert(user, out var isInserted);
+        if (isInserted)
+            return CreatedAtRoute(
+                nameof(GetUserById),
+                new { userId = user.Id },
+                user.Id);
+        return NoContent();
+    }
+    
+    [HttpPatch("{userId}")]
+    [Produces("application/json", "application/xml")]
+    public IActionResult PartiallyUpdateUser([FromRoute] Guid userId, [FromBody] JsonPatchDocument<PutUserDto> patchDoc)
+    {
+        var userEntity = repository.FindById(userId);
+        if (patchDoc == null)
+            return BadRequest();
+        if (userId == Guid.Empty || userEntity == null)
+            return NotFound();
+        var userUpdate = new PutUserDto();
+        patchDoc.ApplyTo(userUpdate, ModelState);
+        if (!TryValidateModel(userUpdate))
+            return UnprocessableEntity(ModelState);
+        var user = mapper.Map(userUpdate, userEntity);
+        repository.Update(user);
+        return NoContent();
     }
 }
