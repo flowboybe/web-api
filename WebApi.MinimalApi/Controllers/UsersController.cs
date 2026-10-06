@@ -52,9 +52,13 @@ public class UsersController : Controller
         var userEntity = mapper.Map<UserEntity>(user);
         var createdUserEntity = userRepository.Insert(userEntity);
 
+        var acceptXml = Request.Headers.Accept.Any(
+            value => value.Contains("application/xml", 
+                StringComparison.OrdinalIgnoreCase));
+
         return CreatedAtRoute(
             nameof(GetUserById),
             new { userId = createdUserEntity.Id },
-            createdUserEntity.Id);
+            acceptXml ? createdUserEntity.Id : new { id = createdUserEntity.Id });
     }
 }
