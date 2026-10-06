@@ -1,6 +1,8 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using WebApi.MinimalApi.Domain;
 using WebApi.MinimalApi.Models;
+using AutoMapper;
+using System.Linq;
 
 namespace WebApi.MinimalApi.Controllers;
 
@@ -8,20 +10,51 @@ namespace WebApi.MinimalApi.Controllers;
 [ApiController]
 public class UsersController : Controller
 {
+    private readonly IUserRepository userRepository;
+    private readonly IMapper mapper;
+    
     // Чтобы ASP.NET положил что-то в userRepository требуется конфигурация
-    public UsersController(IUserRepository userRepository)
+    public UsersController(IUserRepository userRepository, IMapper mapper)
     {
+        this.userRepository = userRepository;
+        this.mapper = mapper;
     }
 
-    [HttpGet("{userId}")]
+    [HttpGet("{userId}", Name = nameof(GetUserById))]
+    [Produces("application/json", "application/xml")]
     public ActionResult<UserDto> GetUserById([FromRoute] Guid userId)
     {
-        throw new NotImplementedException();
+        var userEntity = userRepository.FindById(userId);
+        if (userEntity == null)
+            return NotFound();
+        
+        var userDto = mapper.Map<UserDto>(userEntity);
+        return Ok(userDto);
     }
 
     [HttpPost]
-    public IActionResult CreateUser([FromBody] object user)
+    [Produces("application/json", "application/xml")]
+    public IActionResult CreateUser([FromBody] PostUserDto user)
     {
-        throw new NotImplementedException();
+        if (user == null)
+            return BadRequest();
+
+        if (user.Login != null && !user.Login.All(char.IsLetterOrDigit))
+        {
+            ModelState.AddModelError(
+                nameof(user.Login),
+                "Неправильно написан логин");
+        }
+
+        if (!ModelState.IsValid)
+            return UnprocessableEntity(ModelState);
+
+        var userEntity = mapper.Map<UserEntity>(user);
+        var createdUserEntity = userRepository.Insert(userEntity);
+
+        return CreatedAtRoute(
+            nameof(GetUserById),
+            new { userId = createdUserEntity.Id },
+            createdUserEntity.Id);
     }
 }
