@@ -21,12 +21,18 @@ public class UsersController : Controller
     }
 
     [HttpGet("{userId}", Name = nameof(GetUserById))]
+    [HttpHead("{userId}")]
     [Produces("application/json", "application/xml")]
     public ActionResult<UserDto> GetUserById([FromRoute] Guid userId)
     {
         var userEntity = repository.FindById(userId);
         if (userEntity == null)
             return NotFound();
+        if (HttpMethods.IsHead(Request.Method))
+        {
+            Response.ContentType = "application/json; charset=utf-8";
+            return Ok(); 
+        }
         var userDto = mapper.Map<UserDto>(userEntity);
         return Ok(userDto);
     }
@@ -82,6 +88,17 @@ public class UsersController : Controller
             return UnprocessableEntity(ModelState);
         var user = mapper.Map(userUpdate, userEntity);
         repository.Update(user);
+        return NoContent();
+    }
+
+    [HttpDelete("{userId}")]
+    [Produces("application/json", "application/xml")]
+    public IActionResult DeleteUser([FromRoute] Guid userId)
+    {
+        var userEntity = repository.FindById(userId);
+        if (userEntity is null)
+            return NotFound();
+        repository.Delete(userId);
         return NoContent();
     }
 }
